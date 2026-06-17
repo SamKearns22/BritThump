@@ -19,6 +19,11 @@ const SUPABASE_URL = process.env.SUPABASE_URL || ''; // e.g. https://abcxyz.supa
 const SUPABASE_SECRET_KEY = process.env.SUPABASE_SECRET_KEY || ''; // service_role / sb_secret key — server-side only, never sent to the browser
 const SUPABASE_BUCKET = process.env.SUPABASE_BUCKET || 'article-images';
 
+// Umami analytics — only added to public-facing pages (home, articles, 404),
+// deliberately left off /admin pages so your own publishing visits don't
+// skew the numbers. Override via env var if you ever change Umami sites.
+const ANALYTICS_SCRIPT = process.env.ANALYTICS_SCRIPT || '<script defer src="https://cloud.umami.is/script.js" data-website-id="5bd77b7e-756b-4391-9b19-b5f21082aeb4"></script>';
+
 if (!SUPABASE_URL || !SUPABASE_SECRET_KEY) {
   console.warn('WARNING: SUPABASE_URL and/or SUPABASE_SECRET_KEY are not set. The site will not be able to read or save posts until these are configured.');
 }
@@ -36,7 +41,8 @@ function supabaseHeaders(extra = {}) {
 // --- Storage layer: Supabase Postgres table "posts" via the auto-generated REST API ---
 // Table schema (see README for the exact SQL to run once in the Supabase SQL editor):
 //   id text primary key, slug text unique, title text, kicker text, dek text,
-//   author text, body text, header_image text, mid_image text, created_at timestamptz
+//   author text, body text, header_image text, mid_image text, tags text[],
+//   created_at timestamptz
 
 async function readPosts() {
   try {
@@ -66,6 +72,7 @@ function rowToPost(row) {
     body: row.body,
     headerImage: row.header_image,
     midImage: row.mid_image,
+    tags: Array.isArray(row.tags) ? row.tags : [],
     createdAt: row.created_at,
   };
 }
@@ -81,8 +88,24 @@ function postToRow(post) {
     body: post.body,
     header_image: post.headerImage,
     mid_image: post.midImage,
+    tags: Array.isArray(post.tags) ? post.tags : [],
     created_at: post.createdAt,
   };
+}
+
+// Turn a comma-separated string like "Politics, royals,  Westminster" into
+// a clean array of unique tags, trimmed and de-duplicated case-insensitively
+// (keeping the first-seen casing) so "politics" and "Politics" collapse together.
+function parseTags(input) {
+  if (!input) return [];
+  const seen = new Map();
+  input.split(',').forEach(raw => {
+    const tag = raw.trim();
+    if (!tag) return;
+    const key = tag.toLowerCase();
+    if (!seen.has(key)) seen.set(key, tag);
+  });
+  return Array.from(seen.values());
 }
 
 async function insertPost(post) {
@@ -182,6 +205,26 @@ function formatDate(iso) {
   return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
 }
 
+// RSS <pubDate> requires RFC 822 format, which is what Date.toUTCString() gives us.
+function formatRssDate(iso) {
+  return new Date(iso).toUTCString();
+}
+
+function escapeXml(str) {
+  if (!str) return '';
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+function sendXml(res, status, xml) {
+  res.writeHead(status, { 'Content-Type': 'application/rss+xml; charset=utf-8' });
+  res.end(xml);
+}
+
 function sendHtml(res, status, html) {
   res.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8' });
   res.end(html);
@@ -199,7 +242,7 @@ function sendNotFound(res) {
       <h1>This story didn't make the print run.</h1>
       <p><a href="/">Back to the front page</a></p>
     </div>
-  `, { ogDescription: "This story didn't make the print run." }));
+  `, { ogDescription: "This story didn't make the print run.", extraHead: ANALYTICS_SCRIPT }));
 }
 
 function serveStaticFile(res, filePath, contentType) {
@@ -406,6 +449,7 @@ function renderLayout(title, bodyHtml, options = {}) {
 <meta name="twitter:image" content="${ogImage}">
 
 <link rel="stylesheet" href="/style.css">
+<link rel="alternate" type="application/rss+xml" title="BritThump RSS Feed" href="/rss.xml">
 ${extraHead}
 </head>
 <body>
@@ -426,7 +470,7 @@ ${bodyHtml}
 <footer class="site-footer">
   <div class="wrap">
     <p>BritThump publishes the stories that matter then sorts of plays around with them a bit. Unflinching journalism that follows your down the street and smacks you over the head with an air fryer filled with crisps. Your rancid, shameful window to the world.</p>
-    <p><a href="/admin">Admin</a></p>
+    <p><a href="/rss.xml">RSS feed</a> · <a href="/admin">Admin</a></p>
   </div>
 </footer>
 </body>
@@ -441,7 +485,7 @@ function renderHomepage(posts) {
         <h1>Nothing's been filed yet.</h1>
         <p>Once a story is published, it'll appear here for the nation to misread as fact.</p>
       </div>
-    `);
+    `, { extraHead: ANALYTICS_SCRIPT });
   }
 
   const [lead, ...rest] = posts;
@@ -477,10 +521,31 @@ function renderHomepage(posts) {
         ${gridHtml}
       </div>
     </div>
-  `, { ogImage: `${SITE_URL}/og-default.png` });
+  `, { ogImage: `${SITE_URL}/og-default.png`, extraHead: ANALYTICS_SCRIPT });
 }
 
-function renderArticle(post) {
+function pickRelatedPosts(post, allPosts, limit = 3) {
+  const others = allPosts.filter(p => p.id !== post.id);
+  const postTags = new Set((post.tags || []).map(t => t.toLowerCase()));
+
+  if (postTags.size > 0) {
+    const scored = others
+      .map(p => {
+        const shared = (p.tags || []).filter(t => postTags.has(t.toLowerCase())).length;
+        return { post: p, shared };
+      })
+      .filter(x => x.shared > 0)
+      .sort((a, b) => b.shared - a.shared || new Date(b.post.createdAt) - new Date(a.post.createdAt));
+    if (scored.length > 0) {
+      return scored.slice(0, limit).map(x => x.post);
+    }
+  }
+
+  // Fallback: just the most recent other posts (already sorted by readPosts).
+  return others.slice(0, limit);
+}
+
+function renderArticle(post, allPosts = []) {
   if (!post) return null;
   const paragraphs = textToParagraphs(post.body || '');
   // Match each whole <p>...</p> block so we never cut a tag in half.
@@ -496,6 +561,38 @@ function renderArticle(post) {
     bodyWithMidImage = `${paragraphs}\n<figure class="mid-image"><img src="${post.midImage}" alt=""></figure>`;
   }
 
+  const tagsHtml = (post.tags && post.tags.length > 0) ? `
+    <ul class="tag-list">
+      ${post.tags.map(t => `<li class="tag-chip">${escapeHtml(t)}</li>`).join('\n')}
+    </ul>
+  ` : '';
+
+  const articleUrl = `${SITE_URL}/article/${post.slug}`;
+  const shareText = encodeURIComponent(post.title);
+  const shareUrl = encodeURIComponent(articleUrl);
+  const shareHtml = `
+    <div class="share-row">
+      <span class="share-label">Share:</span>
+      <a class="share-link" href="https://twitter.com/intent/tweet?text=${shareText}&url=${shareUrl}" target="_blank" rel="noopener">X</a>
+      <a class="share-link" href="https://www.facebook.com/sharer/sharer.php?u=${shareUrl}" target="_blank" rel="noopener">Facebook</a>
+      <a class="share-link" href="https://wa.me/?text=${shareText}%20${shareUrl}" target="_blank" rel="noopener">WhatsApp</a>
+    </div>
+  `;
+
+  const related = pickRelatedPosts(post, allPosts);
+  const relatedHtml = related.length > 0 ? `
+    <div class="related-stories">
+      <h2 class="related-heading">More from BritThump</h2>
+      <ul class="related-list">
+        ${related.map(p => `
+          <li class="related-item">
+            <a href="/article/${p.slug}">${escapeHtml(p.title)}</a>
+          </li>
+        `).join('\n')}
+      </ul>
+    </div>
+  ` : '';
+
   return renderLayout(post.title, `
     <article class="wrap article-page">
       <p class="kicker">${escapeHtml(post.kicker || 'TOP STORY')}</p>
@@ -506,15 +603,67 @@ function renderArticle(post) {
       <div class="article-body">
         ${bodyWithMidImage}
       </div>
+      ${tagsHtml}
+      ${shareHtml}
       <hr class="rule">
+      ${relatedHtml}
       <p><a href="/">&larr; Back to the front page</a></p>
     </article>
   `, {
     ogDescription: post.dek || DEFAULT_OG_DESCRIPTION,
     ogImage: post.headerImage || DEFAULT_OG_IMAGE,
-    ogUrl: `${SITE_URL}/article/${post.slug}`,
+    ogUrl: articleUrl,
     ogType: 'article',
+    extraHead: ANALYTICS_SCRIPT,
   });
+}
+
+// Renders a message as a sequence of words that grow larger and tilt more
+// wildly as they go along, with small Union Jack flags sprinkled between
+// them — used for the "something broke" error page. Deterministic (no
+// Math.random) so the same message always renders the same way, just
+// visually chaotic.
+function renderChaosMessage(message) {
+  const words = message.split(' ');
+  const rotations = [-3, 4, -6, 7, -9, 11, -13, 15, -17, 19, -21, 23, -25, 27];
+  const flagEvery = 3; // insert a flag after every N words
+
+  const parts = words.map((word, i) => {
+    const scale = Math.round((1 + i * 0.16) * 100) / 100; // grows steadily larger
+    const rotation = rotations[i % rotations.length];
+    const span = `<span class="chaos-word" style="font-size:${scale}em; transform: rotate(${rotation}deg);">${escapeHtml(word)}</span>`;
+    const flag = ((i + 1) % flagEvery === 0) ? ' <span class="chaos-flag" aria-hidden="true">🇬🇧</span> ' : ' ';
+    return span + flag;
+  }).join('');
+
+  return `<div class="chaos-message" role="alert" aria-label="${escapeHtml(message)}">${parts}</div>`;
+}
+
+function renderRssFeed(posts) {
+  const items = posts.slice(0, 20).map(post => {
+    const link = `${SITE_URL}/article/${post.slug}`;
+    const description = post.dek || (post.body || '').slice(0, 280);
+    return `
+    <item>
+      <title>${escapeXml(post.title)}</title>
+      <link>${link}</link>
+      <guid isPermaLink="true">${link}</guid>
+      <pubDate>${formatRssDate(post.createdAt)}</pubDate>
+      <description>${escapeXml(description)}</description>
+      ${(post.tags || []).map(t => `<category>${escapeXml(t)}</category>`).join('\n      ')}
+    </item>`;
+  }).join('\n');
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>BritThump</title>
+    <link>${SITE_URL}</link>
+    <description>The Truthiest News Around.</description>
+    <language>en-gb</language>
+    ${items}
+  </channel>
+</rss>`;
 }
 
 function renderLogin(error) {
@@ -564,6 +713,9 @@ function renderAdmin(posts, message, errorMessage) {
         <label for="author">Byline (optional)</label>
         <input type="text" id="author" name="author" placeholder="Staff Reporter">
 
+        <label for="tags">Tags (optional, separate with commas)</label>
+        <input type="text" id="tags" name="tags" placeholder="e.g. Politics, Royals, Westminster">
+
         <label for="body">Story text</label>
         <textarea id="body" name="body" rows="14" required placeholder="Paste your Freewrite text here. Leave a blank line between paragraphs."></textarea>
 
@@ -605,6 +757,9 @@ function renderEditForm(post, errorMessage) {
 
         <label for="author">Byline (optional)</label>
         <input type="text" id="author" name="author" value="${escapeHtml(post.author || '')}">
+
+        <label for="tags">Tags (optional, separate with commas)</label>
+        <input type="text" id="tags" name="tags" value="${escapeHtml((post.tags || []).join(', '))}">
 
         <label for="body">Story text</label>
         <textarea id="body" name="body" rows="14" required>${escapeHtml(post.body)}</textarea>
@@ -664,6 +819,7 @@ async function handlePublish(req, res) {
         kicker: (fields.kicker || '').trim(),
         dek: (fields.dek || '').trim(),
         author: (fields.author || '').trim() || 'Staff Reporter',
+        tags: parseTags(fields.tags),
         body,
         headerImage,
         midImage,
@@ -718,6 +874,7 @@ async function handleEditSubmit(req, res, id) {
         kicker: (fields.kicker || '').trim(),
         dek: (fields.dek || '').trim(),
         author: (fields.author || '').trim() || 'Staff Reporter',
+        tags: parseTags(fields.tags),
         body,
         headerImage,
         midImage,
@@ -770,12 +927,19 @@ const server = http.createServer(async (req, res) => {
       return sendHtml(res, 200, renderHomepage(posts));
     }
 
+    // RSS feed
+    if (pathname === '/rss.xml' && req.method === 'GET') {
+      const posts = await readPosts();
+      return sendXml(res, 200, renderRssFeed(posts));
+    }
+
     // Article page
     if (pathname.startsWith('/article/') && req.method === 'GET') {
       const slug = pathname.replace('/article/', '');
       const post = await findPostBySlug(slug);
       if (!post) return sendNotFound(res);
-      return sendHtml(res, 200, renderArticle(post));
+      const allPosts = await readPosts();
+      return sendHtml(res, 200, renderArticle(post, allPosts));
     }
 
     // Admin login page
@@ -843,11 +1007,10 @@ const server = http.createServer(async (req, res) => {
   } catch (e) {
     console.error('Unhandled server error:', e);
     return sendHtml(res, 500, renderLayout('Something went wrong', `
-      <div class="wrap">
+      <div class="wrap error-page">
         <p class="kicker">PRESSES JAMMED</p>
-        <h1>Something went wrong on our end.</h1>
-        <p>Please try again in a moment. If this keeps happening, check that the site's storage connection is configured correctly.</p>
-        <p><a href="/">Back to the front page</a></p>
+        ${renderChaosMessage("We seem to have lost the plot! Come back later, idiot.")}
+        <p style="margin-top: 48px;"><a href="/">Back to the front page</a></p>
       </div>
     `));
   }

@@ -459,6 +459,119 @@ figure.mid-image img {
   margin: 4px 0 8px;
 }
 
+/* Tags */
+
+.tag-list {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0;
+  margin: 28px 0 0;
+}
+
+.tag-chip {
+  font-family: 'Inter', sans-serif;
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  background: #f1efe9;
+  border: 1px solid var(--rule);
+  border-radius: 20px;
+  padding: 6px 14px;
+  color: var(--grey);
+}
+
+/* Share row */
+
+.share-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 24px 0 0;
+  font-family: 'Inter', sans-serif;
+  font-size: 14px;
+}
+
+.share-label {
+  font-weight: 600;
+  color: var(--grey);
+}
+
+.share-link {
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 6px 14px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.share-link:hover {
+  border-color: var(--flag-red);
+  color: var(--flag-red);
+}
+
+/* Related stories */
+
+.related-stories {
+  margin-top: 8px;
+}
+
+.related-heading {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: 1.3rem;
+  margin: 0 0 14px;
+}
+
+.related-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.related-item a {
+  font-family: 'Source Serif 4', serif;
+  font-size: 1.05rem;
+  text-decoration: underline;
+  text-decoration-color: var(--rule);
+}
+
+.related-item a:hover {
+  text-decoration-color: var(--flag-red);
+  color: var(--flag-red);
+}
+
+/* Chaotic error page */
+
+.error-page {
+  padding-top: 60px;
+  padding-bottom: 80px;
+  text-align: center;
+}
+
+.chaos-message {
+  margin-top: 24px;
+  line-height: 2.2;
+  word-spacing: 0.1em;
+}
+
+.chaos-word {
+  display: inline-block;
+  font-family: 'Playfair Display', Georgia, serif;
+  font-weight: 900;
+  color: var(--ink-deep);
+  margin: 0 0.05em;
+}
+
+.chaos-flag {
+  display: inline-block;
+  font-size: 1.4em;
+}
+
 /* Mobile */
 
 @media (max-width: 700px) {

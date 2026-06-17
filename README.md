@@ -45,6 +45,7 @@ for free.
      body text not null,
      header_image text,
      mid_image text,
+     tags text[],
      created_at timestamptz not null default now()
    );
 
@@ -62,6 +63,17 @@ for free.
 
 That's the entire one-time setup. You won't need to touch Supabase again
 day-to-day — publishing happens entirely through your site's `/admin` page.
+
+### If you already set this up before tags existed
+
+If your `posts` table was created before this README mentioned `tags`, run
+this once in the SQL Editor to add the column to your existing table
+(safe to run even if you're not sure — it does nothing if the column is
+already there):
+
+```sql
+alter table posts add column if not exists tags text[];
+```
 
 ## Environment variables
 
@@ -131,12 +143,35 @@ time. The Supabase side can stay free indefinitely either way.
 4. Paste the headline into "Headline," paste the body text into "Story text."
    Leave a blank line between paragraphs — that's how the site knows where
    one paragraph ends and the next begins.
-5. Optionally attach a header image and a mid-article image from your
+5. Optionally add tags (comma-separated, e.g. "Politics, Royals") — these
+   power the "More from BritThump" links at the bottom of each article, by
+   matching stories that share a tag. If you skip tags, that section just
+   falls back to showing your most recent other stories instead.
+6. Optionally attach a header image and a mid-article image from your
    phone's photo library.
-6. Tap Publish. Done — one screen, no extra steps.
+7. Tap Publish. Done — one screen, no extra steps.
 
 To remove a story later, go to the admin page and tap Delete next to it in
 the "Published stories" list.
+
+## Tags, related stories, sharing, and RSS
+
+A few small features that work automatically once a story is published,
+no extra setup needed:
+
+- **Tags**: shown as small pills under each article. Mostly useful for
+  powering "related stories" below — there's no tag browsing page (e.g.
+  `/tag/politics`) yet, just the pills themselves.
+- **More from BritThump**: each article shows up to three related stories,
+  picked by shared tags first, falling back to your most recent stories if
+  there's no tag overlap.
+- **Share buttons**: each article has one-tap share links for X, Facebook,
+  and WhatsApp, pre-filled with the headline and link.
+- **RSS feed**: available at `yoursite.com/rss.xml`, with a link in the
+  footer too. Anyone using a feed reader (Feedly, NetNewsWire, etc.) can
+  follow the site without needing to check back manually. Feed readers
+  that support autodiscovery will also pick it up automatically just from
+  your homepage URL.
 
 ## Editing a published story
 
@@ -157,6 +192,25 @@ The upload feature accepts any image file but doesn't check where the image
 came from. Posting copyrighted photos (e.g. pulled directly from Google
 Images search results) on a public site can create legal risk — free stock
 photo sites (Unsplash, Pexels) or your own photos are safer choices.
+
+## Tracking views (Umami analytics)
+
+The site reports page views to [Umami](https://umami.is), a free, privacy-
+friendly analytics service — no cookies, no consent banner needed. This is
+already wired up and pointed at your Umami account.
+
+- **What's tracked**: the homepage, every article page, and the 404 page.
+- **What's deliberately not tracked**: the `/admin` pages, so your own
+  visits while publishing don't skew the numbers.
+- **Where to see the data**: log in at cloud.umami.is. The dashboard shows
+  total views, top pages (so you can see which articles are popular), and
+  referrers — a spike in visits from a site like x.com or whatsapp usually
+  means someone shared a link there, since platforms don't report shares
+  directly.
+- **If you ever switch Umami accounts**: the tracking snippet lives near
+  the top of `server.js` as `ANALYTICS_SCRIPT`. You can either edit it
+  directly there, or set an `ANALYTICS_SCRIPT` environment variable on
+  your host to override it without touching the code.
 
 ## Link previews on social media (Open Graph)
 
