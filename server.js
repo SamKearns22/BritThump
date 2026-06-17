@@ -373,7 +373,7 @@ ${bodyHtml}
 </main>
 <footer class="site-footer">
   <div class="wrap">
-    <p>The Daily Wind-Up is a work of satire. No journalists, politicians, or members of the royal family were harmed in the making of this nonsense — though several egos may have been bruised.</p>
+    <p>BritThump publishes the stories that matter then sorts of plays around with them a bit. Unflinching journalism that follows your down the street and smacks you over the head with an air fryer filled with crisps. Your rancid, shameful window to the world.</p>
     <p><a href="/admin">Admin</a></p>
   </div>
 </footer>
