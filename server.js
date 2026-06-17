@@ -39,10 +39,11 @@ function supabaseHeaders(extra = {}) {
 // --- Helpers ---
 
 // --- Storage layer: Supabase Postgres table "posts" via the auto-generated REST API ---
-// Table schema (see README for the exact SQL to run once in the Supabase SQL editor):
+// Table schema (see README / MIGRATION.md for the exact SQL to run in the Supabase SQL editor):
 //   id text primary key, slug text unique, title text, kicker text, dek text,
-//   author text, body text, header_image text, mid_image text, tags text[],
-//   created_at timestamptz
+//   author text, body text, header_image text, header_caption text,
+//   mid_image text, mid_caption text, tags text[],
+//   layout text default 'standard', listicle_items jsonb default '[]', created_at timestamptz
 
 async function readPosts() {
   try {
@@ -71,7 +72,11 @@ function rowToPost(row) {
     author: row.author,
     body: row.body,
     headerImage: row.header_image,
+    headerCaption: row.header_caption || '',
     midImage: row.mid_image,
+    midCaption: row.mid_caption || '',
+    layout: row.layout || 'standard',
+    listicleItems: Array.isArray(row.listicle_items) ? row.listicle_items : [],
     tags: Array.isArray(row.tags) ? row.tags : [],
     createdAt: row.created_at,
   };
@@ -87,7 +92,11 @@ function postToRow(post) {
     author: post.author,
     body: post.body,
     header_image: post.headerImage,
+    header_caption: post.headerCaption || '',
     mid_image: post.midImage,
+    mid_caption: post.midCaption || '',
+    layout: post.layout || 'standard',
+    listicle_items: Array.isArray(post.listicleItems) ? post.listicleItems : [],
     tags: Array.isArray(post.tags) ? post.tags : [],
     created_at: post.createdAt,
   };
@@ -296,13 +305,13 @@ function isAuthed(req) {
 
 // --- Multipart form parsing (for image uploads), no dependencies ---
 
-function parseMultipart(req, callback) {
+function parseMultipart(req, callback, maxBytes) {
   const contentType = req.headers['content-type'] || '';
   const match = contentType.match(/boundary=(?:"([^"]+)"|([^;]+))/);
   if (!match) return callback(new Error('No boundary found'), null);
   const boundary = '--' + (match[1] || match[2]);
 
-  const MAX_BYTES = 15 * 1024 * 1024; // 15MB total request cap (two images + text, comfortable for phone photos)
+  const MAX_BYTES = maxBytes || 15 * 1024 * 1024; // default 15MB; callers with many images pass a higher cap
   let totalBytes = 0;
   let tooLarge = false;
 
@@ -438,6 +447,7 @@ function renderLayout(title, bodyHtml, options = {}) {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#A8231F">
 <title>${fullTitle}</title>
 <meta name="description" content="${safeDescription}">
 
@@ -470,6 +480,10 @@ ${extraHead}
     </div>
     <a href="/" class="masthead-title"><img src="/logo.png" alt="BritThump" class="masthead-logo"></a>
     <div class="masthead-tagline">The Truthiest News Around</div>
+    <form action="/search" method="GET" class="masthead-search" role="search">
+      <input type="search" name="q" placeholder="Search BritThump" aria-label="Search BritThump" class="masthead-search-input">
+      <button type="submit" class="masthead-search-btn">Search</button>
+    </form>
   </div>
 </header>
 <main>
@@ -478,7 +492,7 @@ ${bodyHtml}
 <footer class="site-footer">
   <div class="wrap">
     <p>BritThump publishes the stories that matter then sort of plays around with them a bit. Unflinching journalism that follows you down the street and smacks you over the head with an air fryer filled with crisps. Your rancid, shameful window to the world.</p>
-    <p><a href="/rss.xml">RSS feed</a> · <a href="/admin">Admin</a></p>
+    <p><a href="/rss.xml">RSS feed</a> · <a href="/sitemap.xml">Sitemap</a> · <a href="/admin">Admin</a></p>
   </div>
 </footer>
 </body>
@@ -486,6 +500,19 @@ ${bodyHtml}
 }
 
 const POSTS_PER_PAGE = 10;
+
+function renderStoryCard(post, fallbackKicker = 'IN THE NEWS') {
+  return `
+    <article class="grid-story">
+      <a href="/article/${post.slug}" class="grid-link">
+        ${post.headerImage ? `<img class="grid-image" src="${post.headerImage}" alt="${escapeHtml(post.title)}" loading="lazy">` : ''}
+        <p class="kicker">${escapeHtml(post.kicker || fallbackKicker)}</p>
+        <h2 class="grid-headline">${escapeHtml(post.title)}</h2>
+        <p class="byline">By ${escapeHtml(post.author || 'Staff Reporter')} · ${formatDate(post.createdAt)}</p>
+      </a>
+    </article>
+  `;
+}
 
 function renderHomepage(posts, page = 1) {
   if (posts.length === 0) {
@@ -528,7 +555,7 @@ function renderHomepage(posts, page = 1) {
       ${secondary.map(post => `
         <article class="secondary-story">
           <a href="/article/${post.slug}" class="secondary-link">
-            ${post.headerImage ? `<img class="secondary-image" src="${post.headerImage}" alt="${escapeHtml(post.title)}">` : ''}
+            ${post.headerImage ? `<img class="secondary-image" src="${post.headerImage}" alt="${escapeHtml(post.title)}" loading="lazy">` : ''}
             <p class="kicker">${escapeHtml(post.kicker || 'ALSO TODAY')}</p>
             <h2 class="secondary-headline">${escapeHtml(post.title)}</h2>
             <p class="byline">By ${escapeHtml(post.author || 'Staff Reporter')} · ${formatDate(post.createdAt)}</p>
@@ -538,16 +565,7 @@ function renderHomepage(posts, page = 1) {
     </div>
   ` : '';
 
-  const gridHtml = rest.map(post => `
-    <article class="grid-story">
-      <a href="/article/${post.slug}" class="grid-link">
-        ${post.headerImage ? `<img class="grid-image" src="${post.headerImage}" alt="${escapeHtml(post.title)}">` : ''}
-        <p class="kicker">${escapeHtml(post.kicker || 'IN THE NEWS')}</p>
-        <h2 class="grid-headline">${escapeHtml(post.title)}</h2>
-        <p class="byline">By ${escapeHtml(post.author || 'Staff Reporter')} · ${formatDate(post.createdAt)}</p>
-      </a>
-    </article>
-  `).join('\n');
+const gridHtml = rest.map(post => renderStoryCard(post)).join('\n');
 
   const paginationHtml = totalPages > 1 ? `
     <nav class="pagination" aria-label="Pagination">
@@ -572,6 +590,86 @@ function renderHomepage(posts, page = 1) {
     ogUrl: currentPage > 1 ? `${SITE_URL}/?page=${currentPage}` : SITE_URL,
     extraHead: ANALYTICS_SCRIPT,
   });
+}
+
+function renderTagPage(tagName, posts, page = 1) {
+  const totalPages = Math.max(1, Math.ceil(posts.length / POSTS_PER_PAGE));
+  const currentPage = Math.min(Math.max(1, page), totalPages);
+  const pagePosts = posts.slice((currentPage - 1) * POSTS_PER_PAGE, currentPage * POSTS_PER_PAGE);
+  const tagSlug = slugify(tagName);
+
+  const gridHtml = pagePosts.length > 0
+    ? pagePosts.map(post => renderStoryCard(post)).join('\n')
+    : `<p class="empty-tag-message">No stories tagged ${escapeHtml(tagName)} yet.</p>`;
+
+  const paginationHtml = totalPages > 1 ? `
+    <nav class="pagination" aria-label="Pagination">
+      ${currentPage > 1 ? `<a href="/tag/${tagSlug}?page=${currentPage - 1}" class="page-link">&larr; Newer</a>` : '<span class="page-link page-link-disabled">&larr; Newer</span>'}
+      <span class="page-status">Page ${currentPage} of ${totalPages}</span>
+      ${currentPage < totalPages ? `<a href="/tag/${tagSlug}?page=${currentPage + 1}" class="page-link">Older &rarr;</a>` : '<span class="page-link page-link-disabled">Older &rarr;</span>'}
+    </nav>
+  ` : '';
+
+  return renderLayout(`${tagName} — Tag`, `
+    <div class="wrap">
+      <p class="kicker">BROWSING BY TAG</p>
+      <h1 class="tag-page-heading">${escapeHtml(tagName)}</h1>
+      <p class="tag-page-count">${posts.length} ${posts.length === 1 ? 'story' : 'stories'}</p>
+      <hr class="rule">
+      <div class="story-grid">
+        ${gridHtml}
+      </div>
+      ${paginationHtml}
+    </div>
+  `, {
+    ogImage: `${SITE_URL}/og-default.png`,
+    ogUrl: `${SITE_URL}/tag/${tagSlug}`,
+    extraHead: ANALYTICS_SCRIPT,
+  });
+}
+
+function searchPosts(posts, query) {
+  const q = query.trim().toLowerCase();
+  if (!q) return [];
+  return posts.filter(post => {
+    const haystack = [post.title, post.dek, post.body, post.author, ...(post.tags || [])]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase();
+    return haystack.includes(q);
+  });
+}
+
+function renderSearchPage(query, results, page = 1) {
+  const totalPages = Math.max(1, Math.ceil(results.length / POSTS_PER_PAGE));
+  const currentPage = Math.min(Math.max(1, page), totalPages);
+  const pageResults = results.slice((currentPage - 1) * POSTS_PER_PAGE, currentPage * POSTS_PER_PAGE);
+  const encodedQuery = encodeURIComponent(query);
+
+  const gridHtml = pageResults.length > 0
+    ? pageResults.map(post => renderStoryCard(post)).join('\n')
+    : `<p class="empty-tag-message">No stories matching "${escapeHtml(query)}".</p>`;
+
+  const paginationHtml = totalPages > 1 ? `
+    <nav class="pagination" aria-label="Pagination">
+      ${currentPage > 1 ? `<a href="/search?q=${encodedQuery}&page=${currentPage - 1}" class="page-link">&larr; Newer</a>` : '<span class="page-link page-link-disabled">&larr; Newer</span>'}
+      <span class="page-status">Page ${currentPage} of ${totalPages}</span>
+      ${currentPage < totalPages ? `<a href="/search?q=${encodedQuery}&page=${currentPage + 1}" class="page-link">Older &rarr;</a>` : '<span class="page-link page-link-disabled">Older &rarr;</span>'}
+    </nav>
+  ` : '';
+
+  return renderLayout(query ? `Search: ${query}` : 'Search', `
+    <div class="wrap">
+      <p class="kicker">SEARCH RESULTS</p>
+      <h1 class="tag-page-heading">${query ? `"${escapeHtml(query)}"` : 'Search BritThump'}</h1>
+      ${query ? `<p class="tag-page-count">${results.length} ${results.length === 1 ? 'result' : 'results'}</p>` : ''}
+      <hr class="rule">
+      <div class="story-grid">
+        ${gridHtml}
+      </div>
+      ${paginationHtml}
+    </div>
+  `, { extraHead: ANALYTICS_SCRIPT });
 }
 
 function pickRelatedPosts(post, allPosts, limit = 3) {
@@ -606,14 +704,16 @@ function renderArticle(post, allPosts = []) {
     const splitPoint = Math.ceil(paraArr.length / 2);
     const before = paraArr.slice(0, splitPoint).join('\n');
     const after = paraArr.slice(splitPoint).join('\n');
-    bodyWithMidImage = `${before}\n<figure class="mid-image"><img src="${post.midImage}" alt="${escapeHtml(post.title)}"></figure>\n${after}`;
+    const cap = post.midCaption ? `<figcaption class="image-caption">${escapeHtml(post.midCaption)}</figcaption>` : '';
+    bodyWithMidImage = `${before}\n<figure class="mid-image"><img src="${post.midImage}" alt="${escapeHtml(post.title)}" loading="lazy">${cap}</figure>\n${after}`;
   } else if (post.midImage) {
-    bodyWithMidImage = `${paragraphs}\n<figure class="mid-image"><img src="${post.midImage}" alt="${escapeHtml(post.title)}"></figure>`;
+    const cap = post.midCaption ? `<figcaption class="image-caption">${escapeHtml(post.midCaption)}</figcaption>` : '';
+    bodyWithMidImage = `${paragraphs}\n<figure class="mid-image"><img src="${post.midImage}" alt="${escapeHtml(post.title)}" loading="lazy">${cap}</figure>`;
   }
 
   const tagsHtml = (post.tags && post.tags.length > 0) ? `
     <ul class="tag-list">
-      ${post.tags.map(t => `<li class="tag-chip">${escapeHtml(t)}</li>`).join('\n')}
+      ${post.tags.map(t => `<li><a href="/tag/${encodeURIComponent(slugify(t))}" class="tag-chip">${escapeHtml(t)}</a></li>`).join('\n')}
     </ul>
   ` : '';
 
@@ -656,16 +756,38 @@ function renderArticle(post, allPosts = []) {
   };
   const structuredDataScript = `<script type="application/ld+json">${JSON.stringify(structuredData).replace(/<\/script/gi, '<\\/script')}</script>`;
 
+  const headerImageHtml = post.headerImage
+    ? `<figure class="article-header-figure"><img class="article-header-image" src="${post.headerImage}" alt="${escapeHtml(post.title)}">${post.headerCaption ? `<figcaption class="image-caption">${escapeHtml(post.headerCaption)}</figcaption>` : ''}</figure>`
+    : '';
+
+  let mainContentHtml;
+  if (post.layout === 'listicle' && Array.isArray(post.listicleItems) && post.listicleItems.length > 0) {
+    const itemsHtml = post.listicleItems.map((item, i) => {
+      const imageHtml = item.image
+        ? `<figure class="listicle-image"><img src="${item.image}" alt="${escapeHtml(item.heading || post.title)}" loading="lazy">${item.caption ? `<figcaption class="image-caption">${escapeHtml(item.caption)}</figcaption>` : ''}</figure>`
+        : '';
+      const itemBodyHtml = item.body ? textToParagraphs(item.body) : '';
+      return `
+        <section class="listicle-item">
+          <h2 class="listicle-heading"><span class="listicle-number">${i + 1}.</span> ${escapeHtml(item.heading || '')}</h2>
+          <div class="listicle-item-body">${itemBodyHtml}</div>
+          ${imageHtml}
+        </section>
+      `;
+    }).join('\n');
+    mainContentHtml = `<div class="article-body listicle-wrap">${itemsHtml}</div>`;
+  } else {
+    mainContentHtml = `<div class="article-body">${bodyWithMidImage}</div>`;
+  }
+
   return renderLayout(post.title, `
     <article class="wrap article-page">
       <p class="kicker">${escapeHtml(post.kicker || 'DISPATCH')}</p>
       <h1 class="article-headline">${escapeHtml(post.title)}</h1>
       <p class="article-dek">${escapeHtml(post.dek || '')}</p>
       <p class="byline">By ${escapeHtml(post.author || 'Staff Reporter')} · ${formatDate(post.createdAt)}</p>
-      ${post.headerImage ? `<img class="article-header-image" src="${post.headerImage}" alt="${escapeHtml(post.title)}">` : ''}
-      <div class="article-body">
-        ${bodyWithMidImage}
-      </div>
+      ${headerImageHtml}
+      ${mainContentHtml}
       ${tagsHtml}
       ${shareHtml}
       <hr class="rule">
@@ -730,9 +852,13 @@ function renderRssFeed(posts) {
 }
 
 function renderSitemap(posts) {
+  const uniqueTagSlugs = new Set();
+  posts.forEach(post => (post.tags || []).forEach(t => uniqueTagSlugs.add(slugify(t))));
+
   const urls = [
     `<url><loc>${SITE_URL}/</loc><changefreq>daily</changefreq></url>`,
     ...posts.map(post => `<url><loc>${SITE_URL}/article/${post.slug}</loc><lastmod>${new Date(post.createdAt).toISOString().slice(0, 10)}</lastmod></url>`),
+    ...Array.from(uniqueTagSlugs).map(slug => `<url><loc>${SITE_URL}/tag/${slug}</loc></url>`),
   ].join('\n  ');
 
   return `<?xml version="1.0" encoding="UTF-8"?>
@@ -771,11 +897,17 @@ function renderAdmin(posts, message, errorMessage) {
   return renderLayout('Admin', `
     <div class="wrap admin-wrap">
       <p class="kicker">STAFF ONLY</p>
+      <nav class="admin-tabs">
+        <a href="/admin" class="admin-tab admin-tab-active">Standard article</a>
+        <a href="/admin/listicle" class="admin-tab">Listicle</a>
+      </nav>
       <h1>Publish a new story</h1>
       ${message ? `<p class="success-msg">${escapeHtml(message)}</p>` : ''}
       ${errorMessage ? `<p class="error-msg">${escapeHtml(errorMessage)}</p>` : ''}
 
-      <form method="POST" action="/admin/publish" enctype="multipart/form-data" class="admin-form">
+      <form method="POST" action="/admin/publish" enctype="multipart/form-data" class="admin-form" id="publish-form">
+        <p class="draft-status" id="draft-status" hidden></p>
+
         <label for="title">Headline</label>
         <input type="text" id="title" name="title" required placeholder="e.g. Westminster Confirms It Has No Idea Either">
 
@@ -796,12 +928,73 @@ function renderAdmin(posts, message, errorMessage) {
 
         <label for="headerImage">Header image (optional)</label>
         <input type="file" id="headerImage" name="headerImage" accept="image/*">
+        <label for="headerCaption" class="caption-label">Image subheading (optional, shown in italics under the image)</label>
+        <input type="text" id="headerCaption" name="headerCaption" placeholder="e.g. The Prime Minister, yesterday">
 
         <label for="midImage">Mid-article image (optional)</label>
         <input type="file" id="midImage" name="midImage" accept="image/*">
+        <label for="midCaption" class="caption-label">Image subheading (optional, shown in italics under the image)</label>
+        <input type="text" id="midCaption" name="midCaption" placeholder="e.g. An air fryer, earlier">
 
         <button type="submit" class="btn-primary btn-large">Publish</button>
       </form>
+
+      <script>
+        (function() {
+          var DRAFT_KEY = 'britthump-draft-new-post';
+          var fieldIds = ['title', 'kicker', 'dek', 'author', 'tags', 'body', 'headerCaption', 'midCaption'];
+          var form = document.getElementById('publish-form');
+          var statusEl = document.getElementById('draft-status');
+
+          function showStatus(text) {
+            statusEl.textContent = text;
+            statusEl.hidden = false;
+          }
+
+          function saveDraft() {
+            var draft = {};
+            fieldIds.forEach(function(id) {
+              var el = document.getElementById(id);
+              if (el) draft[id] = el.value;
+            });
+            try {
+              localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+            } catch (e) { /* storage unavailable, fail silently */ }
+          }
+
+          function clearDraft() {
+            try { localStorage.removeItem(DRAFT_KEY); } catch (e) {}
+          }
+
+          function restoreDraft() {
+            var raw;
+            try { raw = localStorage.getItem(DRAFT_KEY); } catch (e) { return; }
+            if (!raw) return;
+            var draft;
+            try { draft = JSON.parse(raw); } catch (e) { return; }
+            var hasContent = false;
+            fieldIds.forEach(function(id) {
+              var el = document.getElementById(id);
+              if (el && draft[id]) {
+                el.value = draft[id];
+                hasContent = true;
+              }
+            });
+            if (hasContent) {
+              showStatus('Restored an unsaved draft from this device. Check it over before publishing.');
+            }
+          }
+
+          restoreDraft();
+
+          fieldIds.forEach(function(id) {
+            var el = document.getElementById(id);
+            if (el) el.addEventListener('input', saveDraft);
+          });
+
+          ${message ? 'clearDraft();' : ''}
+        })();
+      </script>
 
       <hr class="rule">
 
@@ -813,6 +1006,239 @@ function renderAdmin(posts, message, errorMessage) {
   `);
 }
 
+function renderListicleForm(message, errorMessage, post) {
+  const isEdit = !!post;
+  const action = isEdit ? `/admin/edit-listicle/${post.id}` : '/admin/publish-listicle';
+  const items = isEdit && Array.isArray(post.listicleItems) ? post.listicleItems : [];
+
+  // When editing, render existing items server-side so their current image URLs
+  // travel with the form (as hidden fields) and can be kept if not replaced.
+  const existingItemsHtml = items.map((item, i) => `
+    <div class="listicle-item-block">
+      <div class="listicle-item-head">
+        <span class="listicle-item-num">Item <span class="num-label">${i + 1}</span></span>
+        <button type="button" class="btn-remove-item">Remove</button>
+      </div>
+      <label>Item heading</label>
+      <input type="text" class="item-heading" name="item_${i}_heading" value="${escapeHtml(item.heading || '')}">
+      <label>Item body text</label>
+      <textarea class="item-body" name="item_${i}_body" rows="4">${escapeHtml(item.body || '')}</textarea>
+      <label>Item image (optional)</label>
+      ${item.image ? `<p class="current-image-note">Current: <a href="${item.image}" target="_blank">view image</a>. Choose a new file to replace it, leave blank to keep it, or tick remove.</p><label class="remove-image-label"><input type="checkbox" class="item-remove-image" name="item_${i}_removeImage" value="1"> Remove current image</label>` : ''}
+      <input type="hidden" class="item-existing-image" name="item_${i}_existingImage" value="${escapeHtml(item.image || '')}">
+      <input type="file" class="item-image" name="item_${i}_image" accept="image/*">
+      <label class="caption-label">Image subheading (optional, shown in italics under the image)</label>
+      <input type="text" class="item-caption" name="item_${i}_caption" value="${escapeHtml(item.caption || '')}">
+    </div>
+  `).join('\n');
+
+  const headerImageNote = (isEdit && post.headerImage)
+    ? `<p class="current-image-note">Current: <a href="${post.headerImage}" target="_blank">view image</a>. Choose a new file to replace it, leave blank to keep it, or tick remove.</p><label class="remove-image-label"><input type="checkbox" name="removeHeaderImage" value="1"> Remove current header image</label>`
+    : '';
+
+  return renderLayout(isEdit ? 'Edit listicle' : 'New listicle', `
+    <div class="wrap admin-wrap">
+      <p class="kicker">STAFF ONLY</p>
+      <nav class="admin-tabs">
+        <a href="/admin" class="admin-tab">Standard article</a>
+        <a href="/admin/listicle" class="admin-tab${isEdit ? '' : ' admin-tab-active'}">Listicle</a>
+      </nav>
+      <h1>${isEdit ? 'Edit listicle' : 'Publish a listicle'}</h1>
+      ${isEdit ? '' : '<p class="listicle-intro">For ranked or numbered articles — each item gets a heading, body text, and an optional image with its own subheading. Add as many items as you like. (e.g. "14 Cake Flavours That Would Suck".)</p>'}
+      ${message ? `<p class="success-msg">${escapeHtml(message)}</p>` : ''}
+      ${errorMessage ? `<p class="error-msg">${escapeHtml(errorMessage)}</p>` : ''}
+
+      <form method="POST" action="${action}" enctype="multipart/form-data" class="admin-form" id="listicle-form">
+        <p class="draft-status" id="draft-status" hidden></p>
+
+        <label for="title">Headline</label>
+        <input type="text" id="title" name="title" required placeholder="e.g. 14 Cake Flavours That Would Suck" value="${isEdit ? escapeHtml(post.title) : ''}">
+
+        <label for="kicker">Kicker (small tag above headline, optional)</label>
+        <input type="text" id="kicker" name="kicker" placeholder="e.g. RANKED / HOT TAKE" value="${isEdit ? escapeHtml(post.kicker || '') : ''}">
+
+        <label for="dek">Sub-headline (one line, optional)</label>
+        <input type="text" id="dek" name="dek" placeholder="A short line that sets up the joke" value="${isEdit ? escapeHtml(post.dek || '') : ''}">
+
+        <label for="author">Byline (optional)</label>
+        <input type="text" id="author" name="author" placeholder="Staff Reporter" value="${isEdit ? escapeHtml(post.author || '') : ''}">
+
+        <label for="tags">Tags (optional, separate with commas)</label>
+        <input type="text" id="tags" name="tags" placeholder="e.g. Food, Opinion" value="${isEdit ? escapeHtml((post.tags || []).join(', ')) : ''}">
+
+        <label for="headerImage">Header image (optional)</label>
+        ${headerImageNote}
+        <input type="file" id="headerImage" name="headerImage" accept="image/*">
+        <label for="headerCaption" class="caption-label">Image subheading (optional, shown in italics under the image)</label>
+        <input type="text" id="headerCaption" name="headerCaption" placeholder="e.g. A cake, unfortunately" value="${isEdit ? escapeHtml(post.headerCaption || '') : ''}">
+
+        <hr class="rule">
+        <h2>List items</h2>
+
+        <div id="listicle-items">${existingItemsHtml}</div>
+
+        <input type="hidden" id="itemCount" name="itemCount" value="${items.length}">
+        <button type="button" class="btn-secondary" id="add-item-btn">+ Add another item</button>
+
+        <button type="submit" class="btn-primary btn-large">${isEdit ? 'Save changes' : 'Publish listicle'}</button>
+      </form>
+
+      <template id="item-template">
+        <div class="listicle-item-block">
+          <div class="listicle-item-head">
+            <span class="listicle-item-num">Item <span class="num-label"></span></span>
+            <button type="button" class="btn-remove-item">Remove</button>
+          </div>
+          <label>Item heading</label>
+          <input type="text" class="item-heading" placeholder="e.g. Wet Cardboard Surprise">
+          <label>Item body text</label>
+          <textarea class="item-body" rows="4" placeholder="Why this cake flavour would suck. Leave a blank line between paragraphs."></textarea>
+          <label>Item image (optional)</label>
+          <input type="file" class="item-image" accept="image/*">
+          <label class="caption-label">Image subheading (optional, shown in italics under the image)</label>
+          <input type="text" class="item-caption" placeholder="e.g. The offending bake">
+        </div>
+      </template>
+
+      <hr class="rule">
+      <p>${isEdit ? '<a href="/admin">&larr; Back without saving</a>' : '<a href="/admin/logout">Log out</a>'}</p>
+
+      <script>
+        (function() {
+          var IS_EDIT = ${isEdit ? 'true' : 'false'};
+          var DRAFT_KEY = ${isEdit ? `'britthump-draft-listicle-edit-${post.id}'` : `'britthump-draft-listicle'`};
+          var topFields = ['title', 'kicker', 'dek', 'author', 'tags', 'headerCaption'];
+          var container = document.getElementById('listicle-items');
+          var template = document.getElementById('item-template');
+          var countInput = document.getElementById('itemCount');
+          var form = document.getElementById('listicle-form');
+          var statusEl = document.getElementById('draft-status');
+
+          function showStatus(text) {
+            statusEl.textContent = text;
+            statusEl.hidden = false;
+          }
+
+          // Renumber items visually and assign correct field names for submission.
+          // Existing items carry hidden "existingImage" / remove-checkbox fields that
+          // must be renamed in lockstep so the server reads them per-index.
+          function renumber() {
+            var blocks = container.querySelectorAll('.listicle-item-block');
+            blocks.forEach(function(block, i) {
+              block.querySelector('.num-label').textContent = (i + 1);
+              block.querySelector('.item-heading').name = 'item_' + i + '_heading';
+              block.querySelector('.item-body').name = 'item_' + i + '_body';
+              block.querySelector('.item-image').name = 'item_' + i + '_image';
+              block.querySelector('.item-caption').name = 'item_' + i + '_caption';
+              var existing = block.querySelector('.item-existing-image');
+              if (existing) existing.name = 'item_' + i + '_existingImage';
+              var removeChk = block.querySelector('.item-remove-image');
+              if (removeChk) removeChk.name = 'item_' + i + '_removeImage';
+            });
+            countInput.value = blocks.length;
+          }
+
+          function wireBlock(block) {
+            block.querySelector('.btn-remove-item').addEventListener('click', function() {
+              block.remove();
+              renumber();
+              saveDraft();
+            });
+            ['.item-heading', '.item-body', '.item-caption'].forEach(function(sel) {
+              var el = block.querySelector(sel);
+              if (el) el.addEventListener('input', saveDraft);
+            });
+          }
+
+          function addItem(values) {
+            var clone = template.content.firstElementChild.cloneNode(true);
+            if (values) {
+              clone.querySelector('.item-heading').value = values.heading || '';
+              clone.querySelector('.item-body').value = values.body || '';
+              clone.querySelector('.item-caption').value = values.caption || '';
+            }
+            container.appendChild(clone);
+            wireBlock(clone);
+            renumber();
+          }
+
+          function saveDraft() {
+            // In edit mode we don't persist drafts to localStorage — the form is already
+            // server-pre-filled from the saved post, and stale drafts would fight that.
+            if (IS_EDIT) return;
+            var draft = { top: {}, items: [] };
+            topFields.forEach(function(id) {
+              var el = document.getElementById(id);
+              if (el) draft.top[id] = el.value;
+            });
+            container.querySelectorAll('.listicle-item-block').forEach(function(block) {
+              draft.items.push({
+                heading: block.querySelector('.item-heading').value,
+                body: block.querySelector('.item-body').value,
+                caption: block.querySelector('.item-caption').value
+              });
+            });
+            try { localStorage.setItem(DRAFT_KEY, JSON.stringify(draft)); } catch (e) {}
+          }
+
+          function clearDraft() {
+            try { localStorage.removeItem(DRAFT_KEY); } catch (e) {}
+          }
+
+          function restoreDraft() {
+            if (IS_EDIT) return false;
+            var raw;
+            try { raw = localStorage.getItem(DRAFT_KEY); } catch (e) { return false; }
+            if (!raw) return false;
+            var draft;
+            try { draft = JSON.parse(raw); } catch (e) { return false; }
+            var hasContent = false;
+            if (draft.top) {
+              topFields.forEach(function(id) {
+                var el = document.getElementById(id);
+                if (el && draft.top[id]) { el.value = draft.top[id]; hasContent = true; }
+              });
+            }
+            if (draft.items && draft.items.length) {
+              draft.items.forEach(function(item) {
+                addItem(item);
+                if (item.heading || item.body || item.caption) hasContent = true;
+              });
+            }
+            return hasContent;
+          }
+
+          // Wire any server-rendered existing item blocks (edit mode).
+          container.querySelectorAll('.listicle-item-block').forEach(wireBlock);
+
+          document.getElementById('add-item-btn').addEventListener('click', function() {
+            addItem();
+            saveDraft();
+          });
+
+          topFields.forEach(function(id) {
+            var el = document.getElementById(id);
+            if (el) el.addEventListener('input', saveDraft);
+          });
+
+          if (!IS_EDIT) {
+            // On load (create mode): restore a saved draft if present, otherwise start with one empty item.
+            var restored = restoreDraft();
+            if (restored) {
+              showStatus('Restored an unsaved listicle draft from this device. Check it over before publishing. (Item images need to be re-attached.)');
+            }
+            if (container.querySelectorAll('.listicle-item-block').length === 0) {
+              addItem();
+            }
+          }
+
+          ${message ? 'clearDraft();' : ''}
+        })();
+      </script>
+    </div>
+  `);
+}
+
 function renderEditForm(post, errorMessage) {
   return renderLayout('Edit story', `
     <div class="wrap admin-wrap">
@@ -820,7 +1246,9 @@ function renderEditForm(post, errorMessage) {
       <h1>Edit story</h1>
       ${errorMessage ? `<p class="error-msg">${escapeHtml(errorMessage)}</p>` : ''}
 
-      <form method="POST" action="/admin/edit/${post.id}" enctype="multipart/form-data" class="admin-form">
+      <form method="POST" action="/admin/edit/${post.id}" enctype="multipart/form-data" class="admin-form" id="edit-form">
+        <p class="draft-status" id="draft-status" hidden></p>
+
         <label for="title">Headline</label>
         <input type="text" id="title" name="title" required value="${escapeHtml(post.title)}">
 
@@ -842,13 +1270,86 @@ function renderEditForm(post, errorMessage) {
         <label for="headerImage">Header image</label>
         ${post.headerImage ? `<p class="current-image-note">Current: <a href="${post.headerImage}" target="_blank">view image</a>. Choose a new file below to replace it, or leave blank to keep it.</p>` : ''}
         <input type="file" id="headerImage" name="headerImage" accept="image/*">
+        <label for="headerCaption" class="caption-label">Image subheading (optional, shown in italics under the image)</label>
+        <input type="text" id="headerCaption" name="headerCaption" value="${escapeHtml(post.headerCaption || '')}">
 
         <label for="midImage">Mid-article image</label>
         ${post.midImage ? `<p class="current-image-note">Current: <a href="${post.midImage}" target="_blank">view image</a>. Choose a new file below to replace it, or leave blank to keep it.</p>` : ''}
         <input type="file" id="midImage" name="midImage" accept="image/*">
+        <label for="midCaption" class="caption-label">Image subheading (optional, shown in italics under the image)</label>
+        <input type="text" id="midCaption" name="midCaption" value="${escapeHtml(post.midCaption || '')}">
 
         <button type="submit" class="btn-primary btn-large">Save changes</button>
       </form>
+
+      <script>
+        (function() {
+          var DRAFT_KEY = 'britthump-draft-edit-${post.id}';
+          var fieldIds = ['title', 'kicker', 'dek', 'author', 'tags', 'body', 'headerCaption', 'midCaption'];
+          var statusEl = document.getElementById('draft-status');
+          var savedValues = {
+            title: ${JSON.stringify(post.title)},
+            kicker: ${JSON.stringify(post.kicker || '')},
+            dek: ${JSON.stringify(post.dek || '')},
+            author: ${JSON.stringify(post.author || '')},
+            tags: ${JSON.stringify((post.tags || []).join(', '))},
+            body: ${JSON.stringify(post.body)},
+            headerCaption: ${JSON.stringify(post.headerCaption || '')},
+            midCaption: ${JSON.stringify(post.midCaption || '')}
+          };
+
+          function showStatus(text) {
+            statusEl.textContent = text;
+            statusEl.hidden = false;
+          }
+
+          function saveDraft() {
+            var draft = {};
+            fieldIds.forEach(function(id) {
+              var el = document.getElementById(id);
+              if (el) draft[id] = el.value;
+            });
+            try {
+              localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+            } catch (e) {}
+          }
+
+          function clearDraft() {
+            try { localStorage.removeItem(DRAFT_KEY); } catch (e) {}
+          }
+
+          function restoreDraft() {
+            var raw;
+            try { raw = localStorage.getItem(DRAFT_KEY); } catch (e) { return; }
+            if (!raw) return;
+            var draft;
+            try { draft = JSON.parse(raw); } catch (e) { return; }
+            function normalize(s) { return (s || '').replace(/\\r\\n/g, '\\n'); }
+            var hasUnsavedChanges = false;
+            fieldIds.forEach(function(id) {
+              if (draft[id] !== undefined && normalize(draft[id]) !== normalize(savedValues[id])) {
+                hasUnsavedChanges = true;
+              }
+            });
+            if (hasUnsavedChanges) {
+              fieldIds.forEach(function(id) {
+                var el = document.getElementById(id);
+                if (el && draft[id] !== undefined) el.value = draft[id];
+              });
+              showStatus('Restored unsaved edits from this device. Check them over before saving.');
+            } else {
+              clearDraft();
+            }
+          }
+
+          restoreDraft();
+
+          fieldIds.forEach(function(id) {
+            var el = document.getElementById(id);
+            if (el) el.addEventListener('input', saveDraft);
+          });
+        })();
+      </script>
 
       <hr class="rule">
 
@@ -869,7 +1370,7 @@ async function handlePublish(req, res) {
     }
     const { fields, files } = result;
     const title = (fields.title || '').trim();
-    const body = (fields.body || '').trim();
+    const body = (fields.body || '').replace(/\r\n/g, '\n').trim();
 
     if (!title || !body) {
       return sendHtml(res, 400, renderAdmin(await readPosts(), null, 'Headline and story text are both required.'));
@@ -897,7 +1398,11 @@ async function handlePublish(req, res) {
         tags: parseTags(fields.tags),
         body,
         headerImage,
+        headerCaption: (fields.headerCaption || '').trim(),
         midImage,
+        midCaption: (fields.midCaption || '').trim(),
+        layout: 'standard',
+        listicleItems: [],
         createdAt: new Date().toISOString(),
       };
 
@@ -910,6 +1415,191 @@ async function handlePublish(req, res) {
       sendHtml(res, 500, renderAdmin(posts, null, 'Publishing failed — there may be a connection problem with storage. Your story was not saved; please try again in a moment.'));
     }
   });
+}
+
+async function handlePublishListicle(req, res) {
+  parseMultipart(req, async (err, result) => {
+    if (err) {
+      const message = err.message.includes('too large')
+        ? 'That upload was too large. Keep total images under about 40MB — try smaller photos.'
+        : 'Something went wrong reading the form. Please try again.';
+      return sendHtml(res, 400, renderListicleForm(null, message));
+    }
+
+    const { fields, files } = result;
+    const title = (fields.title || '').trim();
+    const itemCount = parseInt(fields.itemCount, 10) || 0;
+
+    if (!title) {
+      return sendHtml(res, 400, renderListicleForm(null, 'A headline is required.'));
+    }
+    if (itemCount < 1) {
+      return sendHtml(res, 400, renderListicleForm(null, 'A listicle needs at least one item.'));
+    }
+
+    // Gather items first (without uploading) so we can validate before touching storage.
+    const rawItems = [];
+    for (let i = 0; i < itemCount; i++) {
+      const heading = (fields[`item_${i}_heading`] || '').trim();
+      const itemBody = (fields[`item_${i}_body`] || '').replace(/\r\n/g, '\n').trim();
+      const caption = (fields[`item_${i}_caption`] || '').trim();
+      const imageFile = files[`item_${i}_image`];
+      // Skip an item only if it's entirely empty (no heading, body, or image).
+      if (!heading && !itemBody && !(imageFile && imageFile.data && imageFile.data.length > 0)) continue;
+      rawItems.push({ heading, body: itemBody, caption, imageFile });
+    }
+
+    if (rawItems.length === 0) {
+      return sendHtml(res, 400, renderListicleForm(null, 'Every item was empty — add a heading or body text to at least one.'));
+    }
+
+    try {
+      const headerImage = files.headerImage ? await saveUploadedFile(files.headerImage) : null;
+
+      const listicleItems = [];
+      for (const item of rawItems) {
+        const image = (item.imageFile && item.imageFile.data && item.imageFile.data.length > 0)
+          ? await saveUploadedFile(item.imageFile)
+          : null;
+        listicleItems.push({
+          heading: item.heading,
+          body: item.body,
+          caption: item.caption,
+          image,
+        });
+      }
+
+      const baseSlug = slugify(title);
+      let slug = baseSlug;
+      let counter = 2;
+      while (await slugExists(slug)) {
+        slug = `${baseSlug}-${counter}`;
+        counter++;
+      }
+
+      const newPost = {
+        id: crypto.randomBytes(6).toString('hex'),
+        slug,
+        title,
+        kicker: (fields.kicker || '').trim(),
+        dek: (fields.dek || '').trim(),
+        author: (fields.author || '').trim() || 'Staff Reporter',
+        tags: parseTags(fields.tags),
+        body: '', // listicles store content in listicleItems, not body
+        headerImage,
+        headerCaption: (fields.headerCaption || '').trim(),
+        midImage: null,
+        midCaption: '',
+        layout: 'listicle',
+        listicleItems,
+        createdAt: new Date().toISOString(),
+      };
+
+      await insertPost(newPost);
+      const posts = await readPosts();
+      sendHtml(res, 200, renderAdmin(posts, `Published listicle: "${title}"`));
+    } catch (e) {
+      console.error('Listicle publish failed:', e);
+      sendHtml(res, 500, renderListicleForm(null, 'Publishing failed — there may be a connection problem with storage. Your listicle was not saved; please try again in a moment.'));
+    }
+  }, 60 * 1024 * 1024);
+}
+
+async function handleListicleEditSubmit(req, res, id) {
+  parseMultipart(req, async (err, result) => {
+    const existing = await findPostById(id);
+    if (!existing) return sendNotFound(res);
+
+    if (err) {
+      const message = err.message.includes('too large')
+        ? 'That upload was too large. Keep total images under about 40MB — try smaller photos.'
+        : 'Something went wrong reading the form. Please try again.';
+      return sendHtml(res, 400, renderListicleForm(null, message, existing));
+    }
+
+    const { fields, files } = result;
+    const title = (fields.title || '').trim();
+    const itemCount = parseInt(fields.itemCount, 10) || 0;
+
+    if (!title) {
+      return sendHtml(res, 400, renderListicleForm(null, 'A headline is required.', existing));
+    }
+    if (itemCount < 1) {
+      return sendHtml(res, 400, renderListicleForm(null, 'A listicle needs at least one item.', existing));
+    }
+
+    // Collect each item, resolving its image: a newly uploaded file wins; otherwise
+    // keep the carried-over existing image unless the remove box was ticked.
+    const rawItems = [];
+    for (let i = 0; i < itemCount; i++) {
+      const heading = (fields[`item_${i}_heading`] || '').trim();
+      const itemBody = (fields[`item_${i}_body`] || '').replace(/\r\n/g, '\n').trim();
+      const caption = (fields[`item_${i}_caption`] || '').trim();
+      const existingImage = (fields[`item_${i}_existingImage`] || '').trim();
+      const removeImage = fields[`item_${i}_removeImage`] === '1';
+      const imageFile = files[`item_${i}_image`];
+      const hasNewImage = imageFile && imageFile.data && imageFile.data.length > 0;
+      // Skip only if entirely empty (no text and no image of any kind).
+      if (!heading && !itemBody && !hasNewImage && !(existingImage && !removeImage)) continue;
+      rawItems.push({ heading, body: itemBody, caption, existingImage, removeImage, imageFile, hasNewImage });
+    }
+
+    if (rawItems.length === 0) {
+      return sendHtml(res, 400, renderListicleForm(null, 'Every item was empty — add a heading or body text to at least one.', existing));
+    }
+
+    try {
+      // Header image: new upload replaces, remove box clears, otherwise keep.
+      let headerImage = existing.headerImage;
+      if (files.headerImage && files.headerImage.data.length > 0) {
+        headerImage = await saveUploadedFile(files.headerImage);
+      } else if (fields.removeHeaderImage === '1') {
+        headerImage = null;
+      }
+
+      const listicleItems = [];
+      for (const item of rawItems) {
+        let image;
+        if (item.hasNewImage) {
+          image = await saveUploadedFile(item.imageFile);
+        } else if (item.removeImage) {
+          image = null;
+        } else {
+          image = item.existingImage || null;
+        }
+        listicleItems.push({
+          heading: item.heading,
+          body: item.body,
+          caption: item.caption,
+          image,
+        });
+      }
+
+      const updated = {
+        ...existing,
+        title,
+        kicker: (fields.kicker || '').trim(),
+        dek: (fields.dek || '').trim(),
+        author: (fields.author || '').trim() || 'Staff Reporter',
+        tags: parseTags(fields.tags),
+        body: '',
+        headerImage,
+        headerCaption: (fields.headerCaption || '').trim(),
+        midImage: null,
+        midCaption: '',
+        layout: 'listicle',
+        listicleItems,
+        // slug and createdAt deliberately unchanged, so existing links and order stay stable
+      };
+
+      await updatePost(id, updated);
+      const posts = await readPosts();
+      sendHtml(res, 200, renderAdmin(posts, `Updated listicle: "${title}"`));
+    } catch (e) {
+      console.error('Listicle edit failed:', e);
+      sendHtml(res, 500, renderListicleForm(null, 'Saving failed — there may be a connection problem with storage. Please try again in a moment.', existing));
+    }
+  }, 60 * 1024 * 1024);
 }
 
 async function handleEditSubmit(req, res, id) {
@@ -928,7 +1618,7 @@ async function handleEditSubmit(req, res, id) {
 
     const { fields, files } = result;
     const title = (fields.title || '').trim();
-    const body = (fields.body || '').trim();
+    const body = (fields.body || '').replace(/\r\n/g, '\n').trim();
 
     if (!title || !body) {
       return sendHtml(res, 400, renderEditForm(existing, 'Headline and story text are both required.'));
@@ -952,7 +1642,9 @@ async function handleEditSubmit(req, res, id) {
         tags: parseTags(fields.tags),
         body,
         headerImage,
+        headerCaption: (fields.headerCaption || '').trim(),
         midImage,
+        midCaption: (fields.midCaption || '').trim(),
         // slug and createdAt deliberately unchanged, so existing links and publish order both stay stable
       };
 
@@ -1029,6 +1721,29 @@ const server = http.createServer(async (req, res) => {
       return sendXmlGeneric(res, 200, renderSitemap(posts));
     }
 
+    // Search
+    if (pathname === '/search' && req.method === 'GET') {
+      const query = (parsedUrl.query.q || '').toString();
+      const allPosts = await readPosts();
+      const results = searchPosts(allPosts, query);
+      const page = parseInt(parsedUrl.query.page, 10) || 1;
+      return sendHtml(res, 200, renderSearchPage(query, results, page));
+    }
+
+    // Tag browse page
+    if (pathname.startsWith('/tag/') && req.method === 'GET') {
+      const tagSlug = decodeURIComponent(pathname.replace('/tag/', ''));
+      const allPosts = await readPosts();
+      const matchingPosts = allPosts.filter(post =>
+        (post.tags || []).some(t => slugify(t) === tagSlug)
+      );
+      if (matchingPosts.length === 0) return sendNotFound(res);
+      // Use the original-cased tag text from the first matching post for display
+      const displayTag = matchingPosts[0].tags.find(t => slugify(t) === tagSlug);
+      const page = parseInt(parsedUrl.query.page, 10) || 1;
+      return sendHtml(res, 200, renderTagPage(displayTag, matchingPosts, page));
+    }
+
     // Article page
     if (pathname.startsWith('/article/') && req.method === 'GET') {
       const slug = pathname.replace('/article/', '');
@@ -1081,16 +1796,33 @@ const server = http.createServer(async (req, res) => {
         return handlePublish(req, res);
       }
 
+      if (pathname === '/admin/listicle' && req.method === 'GET') {
+        return sendHtml(res, 200, renderListicleForm(null, null));
+      }
+
+      if (pathname === '/admin/publish-listicle' && req.method === 'POST') {
+        return handlePublishListicle(req, res);
+      }
+
       if (pathname.startsWith('/admin/edit/') && req.method === 'GET') {
         const id = pathname.replace('/admin/edit/', '');
         const post = await findPostById(id);
         if (!post) return sendNotFound(res);
+        // Listicles open in the listicle form; standard posts in the standard editor.
+        if (post.layout === 'listicle') {
+          return sendHtml(res, 200, renderListicleForm(null, null, post));
+        }
         return sendHtml(res, 200, renderEditForm(post, null));
       }
 
       if (pathname.startsWith('/admin/edit/') && req.method === 'POST') {
         const id = pathname.replace('/admin/edit/', '');
         return handleEditSubmit(req, res, id);
+      }
+
+      if (pathname.startsWith('/admin/edit-listicle/') && req.method === 'POST') {
+        const id = pathname.replace('/admin/edit-listicle/', '');
+        return handleListicleEditSubmit(req, res, id);
       }
 
       if (pathname.startsWith('/admin/delete/') && req.method === 'POST') {
