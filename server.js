@@ -225,6 +225,11 @@ function sendXml(res, status, xml) {
   res.end(xml);
 }
 
+function sendXmlGeneric(res, status, xml) {
+  res.writeHead(status, { 'Content-Type': 'application/xml; charset=utf-8' });
+  res.end(xml);
+}
+
 function sendHtml(res, status, html) {
   res.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8' });
   res.end(html);
@@ -449,7 +454,10 @@ function renderLayout(title, bodyHtml, options = {}) {
 <meta name="twitter:image" content="${ogImage}">
 
 <link rel="stylesheet" href="/style.css">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="/favicon-180.png">
 <link rel="alternate" type="application/rss+xml" title="BritThump RSS Feed" href="/rss.xml">
+<link rel="canonical" href="${ogUrl}">
 ${extraHead}
 </head>
 <body>
@@ -477,7 +485,9 @@ ${bodyHtml}
 </html>`;
 }
 
-function renderHomepage(posts) {
+const POSTS_PER_PAGE = 10;
+
+function renderHomepage(posts, page = 1) {
   if (posts.length === 0) {
     return renderLayout('Home', `
       <div class="wrap empty-state">
@@ -488,24 +498,50 @@ function renderHomepage(posts) {
     `, { extraHead: ANALYTICS_SCRIPT });
   }
 
-  const [lead, ...rest] = posts;
+  const totalPages = Math.max(1, Math.ceil(posts.length / POSTS_PER_PAGE));
+  const currentPage = Math.min(Math.max(1, page), totalPages);
+  const pagePosts = posts.slice((currentPage - 1) * POSTS_PER_PAGE, currentPage * POSTS_PER_PAGE);
 
-  const leadHtml = `
+  // Page 1 gets the full "front page" treatment: a lead story, then two
+  // secondary stories side by side, then the regular grid. Later pages
+  // skip the lead/secondary treatment entirely, since "page 2's top story"
+  // isn't really a lead story — it just goes straight into the grid.
+  const isFrontPage = currentPage === 1;
+  const lead = isFrontPage ? pagePosts[0] : null;
+  const secondary = isFrontPage ? pagePosts.slice(1, 3) : [];
+  const rest = isFrontPage ? pagePosts.slice(3) : pagePosts;
+
+  const leadHtml = lead ? `
     <article class="lead-story">
       <a href="/article/${lead.slug}" class="lead-link">
-        ${lead.headerImage ? `<img class="lead-image" src="${lead.headerImage}" alt="">` : ''}
+        ${lead.headerImage ? `<img class="lead-image" src="${lead.headerImage}" alt="${escapeHtml(lead.title)}">` : ''}
         <p class="kicker">${escapeHtml(lead.kicker || 'TOP STORY')}</p>
         <h1 class="lead-headline">${escapeHtml(lead.title)}</h1>
         <p class="byline">By ${escapeHtml(lead.author || 'Staff Reporter')} · ${formatDate(lead.createdAt)}</p>
         <p class="lead-dek">${escapeHtml(lead.dek || '')}</p>
       </a>
     </article>
-  `;
+  ` : '';
+
+  const secondaryHtml = secondary.length > 0 ? `
+    <div class="secondary-row">
+      ${secondary.map(post => `
+        <article class="secondary-story">
+          <a href="/article/${post.slug}" class="secondary-link">
+            ${post.headerImage ? `<img class="secondary-image" src="${post.headerImage}" alt="${escapeHtml(post.title)}">` : ''}
+            <p class="kicker">${escapeHtml(post.kicker || 'ALSO TODAY')}</p>
+            <h2 class="secondary-headline">${escapeHtml(post.title)}</h2>
+            <p class="byline">By ${escapeHtml(post.author || 'Staff Reporter')} · ${formatDate(post.createdAt)}</p>
+          </a>
+        </article>
+      `).join('\n')}
+    </div>
+  ` : '';
 
   const gridHtml = rest.map(post => `
     <article class="grid-story">
       <a href="/article/${post.slug}" class="grid-link">
-        ${post.headerImage ? `<img class="grid-image" src="${post.headerImage}" alt="">` : ''}
+        ${post.headerImage ? `<img class="grid-image" src="${post.headerImage}" alt="${escapeHtml(post.title)}">` : ''}
         <p class="kicker">${escapeHtml(post.kicker || 'IN THE NEWS')}</p>
         <h2 class="grid-headline">${escapeHtml(post.title)}</h2>
         <p class="byline">By ${escapeHtml(post.author || 'Staff Reporter')} · ${formatDate(post.createdAt)}</p>
@@ -513,15 +549,29 @@ function renderHomepage(posts) {
     </article>
   `).join('\n');
 
+  const paginationHtml = totalPages > 1 ? `
+    <nav class="pagination" aria-label="Pagination">
+      ${currentPage > 1 ? `<a href="/?page=${currentPage - 1}" class="page-link">&larr; Newer</a>` : '<span class="page-link page-link-disabled">&larr; Newer</span>'}
+      <span class="page-status">Page ${currentPage} of ${totalPages}</span>
+      ${currentPage < totalPages ? `<a href="/?page=${currentPage + 1}" class="page-link">Older &rarr;</a>` : '<span class="page-link page-link-disabled">Older &rarr;</span>'}
+    </nav>
+  ` : '';
+
   return renderLayout('Home', `
     <div class="wrap">
       ${leadHtml}
+      ${secondaryHtml ? `<hr class="rule">${secondaryHtml}` : ''}
       <hr class="rule">
       <div class="story-grid">
         ${gridHtml}
       </div>
+      ${paginationHtml}
     </div>
-  `, { ogImage: `${SITE_URL}/og-default.png`, extraHead: ANALYTICS_SCRIPT });
+  `, {
+    ogImage: `${SITE_URL}/og-default.png`,
+    ogUrl: currentPage > 1 ? `${SITE_URL}/?page=${currentPage}` : SITE_URL,
+    extraHead: ANALYTICS_SCRIPT,
+  });
 }
 
 function pickRelatedPosts(post, allPosts, limit = 3) {
@@ -556,9 +606,9 @@ function renderArticle(post, allPosts = []) {
     const splitPoint = Math.ceil(paraArr.length / 2);
     const before = paraArr.slice(0, splitPoint).join('\n');
     const after = paraArr.slice(splitPoint).join('\n');
-    bodyWithMidImage = `${before}\n<figure class="mid-image"><img src="${post.midImage}" alt=""></figure>\n${after}`;
+    bodyWithMidImage = `${before}\n<figure class="mid-image"><img src="${post.midImage}" alt="${escapeHtml(post.title)}"></figure>\n${after}`;
   } else if (post.midImage) {
-    bodyWithMidImage = `${paragraphs}\n<figure class="mid-image"><img src="${post.midImage}" alt=""></figure>`;
+    bodyWithMidImage = `${paragraphs}\n<figure class="mid-image"><img src="${post.midImage}" alt="${escapeHtml(post.title)}"></figure>`;
   }
 
   const tagsHtml = (post.tags && post.tags.length > 0) ? `
@@ -593,13 +643,26 @@ function renderArticle(post, allPosts = []) {
     </div>
   ` : '';
 
+  const structuredData = {
+    '@context': 'https://schema.org',
+    '@type': 'NewsArticle',
+    headline: post.title,
+    description: post.dek || DEFAULT_OG_DESCRIPTION,
+    datePublished: post.createdAt,
+    author: { '@type': 'Person', name: post.author || 'Staff Reporter' },
+    publisher: { '@type': 'Organization', name: 'BritThump', logo: { '@type': 'ImageObject', url: `${SITE_URL}/logo.png` } },
+    mainEntityOfPage: articleUrl,
+    ...(post.headerImage ? { image: [post.headerImage] } : {}),
+  };
+  const structuredDataScript = `<script type="application/ld+json">${JSON.stringify(structuredData).replace(/<\/script/gi, '<\\/script')}</script>`;
+
   return renderLayout(post.title, `
     <article class="wrap article-page">
-      <p class="kicker">${escapeHtml(post.kicker || 'TOP STORY')}</p>
+      <p class="kicker">${escapeHtml(post.kicker || 'DISPATCH')}</p>
       <h1 class="article-headline">${escapeHtml(post.title)}</h1>
       <p class="article-dek">${escapeHtml(post.dek || '')}</p>
       <p class="byline">By ${escapeHtml(post.author || 'Staff Reporter')} · ${formatDate(post.createdAt)}</p>
-      ${post.headerImage ? `<img class="article-header-image" src="${post.headerImage}" alt="">` : ''}
+      ${post.headerImage ? `<img class="article-header-image" src="${post.headerImage}" alt="${escapeHtml(post.title)}">` : ''}
       <div class="article-body">
         ${bodyWithMidImage}
       </div>
@@ -614,7 +677,7 @@ function renderArticle(post, allPosts = []) {
     ogImage: post.headerImage || DEFAULT_OG_IMAGE,
     ogUrl: articleUrl,
     ogType: 'article',
-    extraHead: ANALYTICS_SCRIPT,
+    extraHead: ANALYTICS_SCRIPT + structuredDataScript,
   });
 }
 
@@ -664,6 +727,18 @@ function renderRssFeed(posts) {
     ${items}
   </channel>
 </rss>`;
+}
+
+function renderSitemap(posts) {
+  const urls = [
+    `<url><loc>${SITE_URL}/</loc><changefreq>daily</changefreq></url>`,
+    ...posts.map(post => `<url><loc>${SITE_URL}/article/${post.slug}</loc><lastmod>${new Date(post.createdAt).toISOString().slice(0, 10)}</lastmod></url>`),
+  ].join('\n  ');
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  ${urls}
+</urlset>`;
 }
 
 function renderLogin(error) {
@@ -921,16 +996,37 @@ const server = http.createServer(async (req, res) => {
       return serveStaticFile(res, path.join(ROOT, 'logo.png'), 'image/png');
     }
 
+    if (pathname === '/favicon.ico') {
+      return serveStaticFile(res, path.join(ROOT, 'favicon.ico'), 'image/x-icon');
+    }
+
+    if (pathname === '/favicon-180.png') {
+      return serveStaticFile(res, path.join(ROOT, 'favicon-180.png'), 'image/png');
+    }
+
     // Public homepage
     if (pathname === '/' && req.method === 'GET') {
       const posts = await readPosts();
-      return sendHtml(res, 200, renderHomepage(posts));
+      const page = parseInt(parsedUrl.query.page, 10) || 1;
+      return sendHtml(res, 200, renderHomepage(posts, page));
     }
 
     // RSS feed
     if (pathname === '/rss.xml' && req.method === 'GET') {
       const posts = await readPosts();
       return sendXml(res, 200, renderRssFeed(posts));
+    }
+
+    // robots.txt — point crawlers at the sitemap, keep /admin out of the index
+    if (pathname === '/robots.txt' && req.method === 'GET') {
+      res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+      return res.end(`User-agent: *\nDisallow: /admin\nSitemap: ${SITE_URL}/sitemap.xml\n`);
+    }
+
+    // sitemap.xml — homepage plus every published article
+    if (pathname === '/sitemap.xml' && req.method === 'GET') {
+      const posts = await readPosts();
+      return sendXmlGeneric(res, 200, renderSitemap(posts));
     }
 
     // Article page
