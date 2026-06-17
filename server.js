@@ -364,8 +364,8 @@ ${extraHead}
       <span class="masthead-divider">·</span>
       <span>UNITED KINGDOM</span>
     </div>
-    <a href="/" class="masthead-title">The Daily Wind-Up</a>
-    <div class="masthead-tagline">All the news that's fit to fabricate</div>
+    <a href="/" class="masthead-title">BritThump</a>
+    <div class="masthead-tagline">The Truthiest News Around</div>
   </div>
 </header>
 <main>
