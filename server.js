@@ -477,7 +477,7 @@ ${bodyHtml}
 </main>
 <footer class="site-footer">
   <div class="wrap">
-    <p>BritThump publishes the stories that matter then sorts of plays around with them a bit. Unflinching journalism that follows your down the street and smacks you over the head with an air fryer filled with crisps. Your rancid, shameful window to the world.</p>
+    <p>BritThump publishes the stories that matter then sort of plays around with them a bit. Unflinching journalism that follows you down the street and smacks you over the head with an air fryer filled with crisps. Your rancid, shameful window to the world.</p>
     <p><a href="/rss.xml">RSS feed</a> · <a href="/admin">Admin</a></p>
   </div>
 </footer>
