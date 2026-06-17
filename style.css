@@ -77,7 +77,7 @@ hr.rule {
 
 .masthead-logo {
   display: block;
-  height: clamp(40px, 9vw, 80px);
+  height: clamp(53px, 12vw, 107px);
   width: auto;
 }
 
@@ -667,7 +667,7 @@ figure.mid-image img {
   }
 
   .masthead-logo {
-    height: 36px;
+    height: 48px;
   }
 
   .masthead-tagline {
