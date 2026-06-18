@@ -297,6 +297,41 @@ main {
   color: var(--ink-deep);
 }
 
+/* Excerpt preview — a few lines of body text under the byline on homepage
+   cards, fading out near the bottom to hint there's more to read. Built with
+   a clamped height plus a gradient overlay (rather than -webkit-line-clamp's
+   ellipsis) so the cutoff looks like a fade, not a truncation. */
+
+.card-excerpt {
+  position: relative;
+  font-family: 'Source Serif 4', serif;
+  font-size: 0.95rem;
+  line-height: 1.5;
+  color: var(--ink);
+  margin: 10px 0 0;
+  max-height: 4.5em;
+  overflow: hidden;
+}
+
+.card-excerpt::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2.2em;
+  background: linear-gradient(to bottom, rgba(253, 251, 247, 0) 0%, var(--paper) 90%);
+}
+
+.card-excerpt-lead {
+  font-size: 1.05rem;
+  max-height: 5.4em;
+}
+
+.card-excerpt-lead::after {
+  background: linear-gradient(to bottom, rgba(253, 251, 247, 0) 0%, var(--paper) 90%);
+}
+
 /* Article page */
 
 .article-page {

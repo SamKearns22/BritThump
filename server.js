@@ -502,6 +502,7 @@ ${bodyHtml}
 const POSTS_PER_PAGE = 10;
 
 function renderStoryCard(post, fallbackKicker = 'IN THE NEWS') {
+  const excerpt = buildExcerpt(post);
   return `
     <article class="grid-story">
       <a href="/article/${post.slug}" class="grid-link">
@@ -509,6 +510,7 @@ function renderStoryCard(post, fallbackKicker = 'IN THE NEWS') {
         <p class="kicker">${escapeHtml(post.kicker || fallbackKicker)}</p>
         <h2 class="grid-headline">${escapeHtml(post.title)}</h2>
         <p class="byline">By ${escapeHtml(post.author || 'Staff Reporter')} · ${formatDate(post.createdAt)}</p>
+        ${excerpt ? `<p class="card-excerpt">${excerpt}</p>` : ''}
       </a>
     </article>
   `;
@@ -546,6 +548,7 @@ function renderHomepage(posts, page = 1) {
         <h1 class="lead-headline">${escapeHtml(lead.title)}</h1>
         <p class="byline">By ${escapeHtml(lead.author || 'Staff Reporter')} · ${formatDate(lead.createdAt)}</p>
         <p class="lead-dek">${escapeHtml(lead.dek || '')}</p>
+        ${buildExcerpt(lead) ? `<p class="card-excerpt card-excerpt-lead">${buildExcerpt(lead)}</p>` : ''}
       </a>
     </article>
   ` : '';
@@ -559,6 +562,7 @@ function renderHomepage(posts, page = 1) {
             <p class="kicker">${escapeHtml(post.kicker || 'ALSO TODAY')}</p>
             <h2 class="secondary-headline">${escapeHtml(post.title)}</h2>
             <p class="byline">By ${escapeHtml(post.author || 'Staff Reporter')} · ${formatDate(post.createdAt)}</p>
+            ${buildExcerpt(post) ? `<p class="card-excerpt">${buildExcerpt(post)}</p>` : ''}
           </a>
         </article>
       `).join('\n')}
@@ -670,6 +674,28 @@ function renderSearchPage(query, results, page = 1) {
       ${paginationHtml}
     </div>
   `, { extraHead: ANALYTICS_SCRIPT });
+}
+
+// Builds a short plain-text teaser for story cards on the homepage/tag/search
+// pages. Pulls from the standard body text, or — for listicles, which store
+// their content in listicleItems rather than body — from the first item's
+// heading and body, so a listicle still gets a sensible preview whether or
+// not it has its own intro text.
+function getExcerptSource(post) {
+  if (post.layout === 'listicle' && Array.isArray(post.listicleItems) && post.listicleItems.length > 0) {
+    const first = post.listicleItems[0];
+    const heading = first.heading ? `${first.heading}. ` : '';
+    return `${heading}${first.body || ''}`.trim();
+  }
+  return post.body || '';
+}
+
+function buildExcerpt(post) {
+  const source = getExcerptSource(post);
+  if (!source) return '';
+  // Collapse to a single line of plain text — no markup, no blank-line breaks —
+  // since the excerpt is clamped visually by CSS rather than cut at a paragraph.
+  return escapeHtml(source.replace(/\s+/g, ' ').trim());
 }
 
 function pickRelatedPosts(post, allPosts, limit = 3) {
