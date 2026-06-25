@@ -1,4 +1,4 @@
-// BritThump — server.js
+// The Tiny Island Times — server.js
 // Zero npm dependencies — uses only Node's built-in modules (Node 18+ for global fetch).
 // Posts are stored in a Supabase Postgres table; images in Supabase Storage.
 // This keeps the app itself free to host (no disk needed) while still being
@@ -22,7 +22,7 @@ const SUPABASE_BUCKET = process.env.SUPABASE_BUCKET || 'article-images';
 // Umami analytics — only added to public-facing pages (home, articles, 404),
 // deliberately left off /admin pages so your own publishing visits don't
 // skew the numbers. Override via env var if you ever change Umami sites.
-const ANALYTICS_SCRIPT = process.env.ANALYTICS_SCRIPT || '<script defer src="https://cloud.umami.is/script.js" data-website-id="5bd77b7e-756b-4391-9b19-b5f21082aeb4"></script>';
+const ANALYTICS_SCRIPT = process.env.ANALYTICS_SCRIPT || '<script defer src="https://cloud.umami.is/script.js" data-website-id="5d0eaddd-773e-4a4c-86e2-dd057fb5ba89"></script>';
 
 if (!SUPABASE_URL || !SUPABASE_SECRET_KEY) {
   console.warn('WARNING: SUPABASE_URL and/or SUPABASE_SECRET_KEY are not set. The site will not be able to read or save posts until these are configured.');
@@ -426,7 +426,9 @@ function parseBodyUrlEncoded(req, callback) {
 
 // --- Templates ---
 
-const SITE_URL = process.env.SITE_URL || 'https://britthump.onrender.com';
+// Strip any trailing slash so that every "${SITE_URL}/..." concatenation below
+// produces a single slash, regardless of how the env var happens to be set.
+const SITE_URL = (process.env.SITE_URL || 'https://tinyislandtimes.onrender.com').replace(/\/+$/, '');
 const DEFAULT_OG_DESCRIPTION = 'The Truthiest News Around.';
 const DEFAULT_OG_IMAGE = `${SITE_URL}/og-default.png`;
 
@@ -439,7 +441,7 @@ function renderLayout(title, bodyHtml, options = {}) {
     ogType = 'website',
   } = options;
 
-  const fullTitle = `${escapeHtml(title)} — BritThump`;
+  const fullTitle = `${escapeHtml(title)} — The Tiny Island Times`;
   const safeDescription = escapeHtml(ogDescription);
 
   return `<!DOCTYPE html>
@@ -456,7 +458,7 @@ function renderLayout(title, bodyHtml, options = {}) {
 <meta property="og:image" content="${ogImage}">
 <meta property="og:url" content="${ogUrl}">
 <meta property="og:type" content="${ogType}">
-<meta property="og:site_name" content="BritThump">
+<meta property="og:site_name" content="The Tiny Island Times">
 
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="${fullTitle}">
@@ -466,7 +468,7 @@ function renderLayout(title, bodyHtml, options = {}) {
 <link rel="stylesheet" href="/style.css">
 <link rel="icon" href="/favicon.ico" sizes="any">
 <link rel="apple-touch-icon" href="/favicon-180.png">
-<link rel="alternate" type="application/rss+xml" title="BritThump RSS Feed" href="/rss.xml">
+<link rel="alternate" type="application/rss+xml" title="The Tiny Island Times RSS Feed" href="/rss.xml">
 <link rel="canonical" href="${ogUrl}">
 ${extraHead}
 </head>
@@ -478,10 +480,14 @@ ${extraHead}
       <span class="masthead-divider">·</span>
       <span>UNITED KINGDOM</span>
     </div>
-    <a href="/" class="masthead-title"><img src="/logo.png" alt="BritThump" class="masthead-logo"></a>
+    <a href="/" class="masthead-title"><img src="/logo.png" alt="The Tiny Island Times" class="masthead-logo"></a>
     <div class="masthead-tagline">The Truthiest News Around</div>
+    <a href="https://www.facebook.com/share/1DR8xdfRyp/?mibextid=wwXIfr" target="_blank" rel="noopener" class="fb-follow-btn" aria-label="Follow The Tiny Island Times on Facebook">
+      <svg class="fb-follow-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M24 12.073C24 5.405 18.627 0 12 0S0 5.405 0 12.073C0 18.1 4.388 23.094 10.125 24v-8.437H7.078v-3.49h3.047V9.41c0-3.025 1.792-4.697 4.533-4.697 1.312 0 2.686.235 2.686.235v2.97h-1.513c-1.491 0-1.956.93-1.956 1.886v2.269h3.328l-.532 3.49h-2.796V24C19.612 23.094 24 18.1 24 12.073z"/></svg>
+      Follow us on Facebook
+    </a>
     <form action="/search" method="GET" class="masthead-search" role="search">
-      <input type="search" name="q" placeholder="Search BritThump" aria-label="Search BritThump" class="masthead-search-input">
+      <input type="search" name="q" placeholder="Search The Tiny Island Times" aria-label="Search The Tiny Island Times" class="masthead-search-input">
       <button type="submit" class="masthead-search-btn">Search</button>
     </form>
   </div>
@@ -491,7 +497,7 @@ ${bodyHtml}
 </main>
 <footer class="site-footer">
   <div class="wrap">
-    <p>BritThump publishes the stories that matter then sort of plays around with them a bit. Unflinching journalism that follows you down the street and smacks you over the head with an air fryer filled with crisps. Your rancid, shameful window to the world.</p>
+    <p>The Tiny Island Times publishes the stories that matter then sort of plays around with them a bit. Unflinching journalism that follows you down the street and smacks you over the head with an air fryer filled with crisps. Your rancid, shameful window to the world.</p>
     <p><a href="/rss.xml">RSS feed</a> · <a href="/sitemap.xml">Sitemap</a> · <a href="/admin">Admin</a></p>
   </div>
 </footer>
@@ -665,7 +671,7 @@ function renderSearchPage(query, results, page = 1) {
   return renderLayout(query ? `Search: ${query}` : 'Search', `
     <div class="wrap">
       <p class="kicker">SEARCH RESULTS</p>
-      <h1 class="tag-page-heading">${query ? `"${escapeHtml(query)}"` : 'Search BritThump'}</h1>
+      <h1 class="tag-page-heading">${query ? `"${escapeHtml(query)}"` : 'Search The Tiny Island Times'}</h1>
       ${query ? `<p class="tag-page-count">${results.length} ${results.length === 1 ? 'result' : 'results'}</p>` : ''}
       <hr class="rule">
       <div class="story-grid">
@@ -758,7 +764,7 @@ function renderArticle(post, allPosts = []) {
   const related = pickRelatedPosts(post, allPosts);
   const relatedHtml = related.length > 0 ? `
     <div class="related-stories">
-      <h2 class="related-heading">More from BritThump</h2>
+      <h2 class="related-heading">More from The Tiny Island Times</h2>
       <ul class="related-list">
         ${related.map(p => `
           <li class="related-item">
@@ -776,7 +782,7 @@ function renderArticle(post, allPosts = []) {
     description: post.dek || DEFAULT_OG_DESCRIPTION,
     datePublished: post.createdAt,
     author: { '@type': 'Person', name: post.author || 'Staff Reporter' },
-    publisher: { '@type': 'Organization', name: 'BritThump', logo: { '@type': 'ImageObject', url: `${SITE_URL}/logo.png` } },
+    publisher: { '@type': 'Organization', name: 'The Tiny Island Times', logo: { '@type': 'ImageObject', url: `${SITE_URL}/logo.png` } },
     mainEntityOfPage: articleUrl,
     ...(post.headerImage ? { image: [post.headerImage] } : {}),
   };
@@ -868,7 +874,7 @@ function renderRssFeed(posts) {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0">
   <channel>
-    <title>BritThump</title>
+    <title>The Tiny Island Times</title>
     <link>${SITE_URL}</link>
     <description>The Truthiest News Around.</description>
     <language>en-gb</language>
@@ -967,7 +973,7 @@ function renderAdmin(posts, message, errorMessage) {
 
       <script>
         (function() {
-          var DRAFT_KEY = 'britthump-draft-new-post';
+          var DRAFT_KEY = 'tinyislandtimes-draft-new-post';
           var fieldIds = ['title', 'kicker', 'dek', 'author', 'tags', 'body', 'headerCaption', 'midCaption'];
           var form = document.getElementById('publish-form');
           var statusEl = document.getElementById('draft-status');
@@ -1132,7 +1138,7 @@ function renderListicleForm(message, errorMessage, post) {
       <script>
         (function() {
           var IS_EDIT = ${isEdit ? 'true' : 'false'};
-          var DRAFT_KEY = ${isEdit ? `'britthump-draft-listicle-edit-${post.id}'` : `'britthump-draft-listicle'`};
+          var DRAFT_KEY = ${isEdit ? `'tinyislandtimes-draft-listicle-edit-${post.id}'` : `'tinyislandtimes-draft-listicle'`};
           var topFields = ['title', 'kicker', 'dek', 'author', 'tags', 'headerCaption'];
           var container = document.getElementById('listicle-items');
           var template = document.getElementById('item-template');
@@ -1310,7 +1316,7 @@ function renderEditForm(post, errorMessage) {
 
       <script>
         (function() {
-          var DRAFT_KEY = 'britthump-draft-edit-${post.id}';
+          var DRAFT_KEY = 'tinyislandtimes-draft-edit-${post.id}';
           var fieldIds = ['title', 'kicker', 'dek', 'author', 'tags', 'body', 'headerCaption', 'midCaption'];
           var statusEl = document.getElementById('draft-status');
           var savedValues = {
@@ -1735,10 +1741,17 @@ const server = http.createServer(async (req, res) => {
       return sendXml(res, 200, renderRssFeed(posts));
     }
 
-    // robots.txt — point crawlers at the sitemap, keep /admin out of the index
+    // robots.txt — point crawlers at the sitemap, keep /admin out of the index.
+    // NOTE: this route was NOT the cause of Facebook link previews failing
+    // (403 in the Sharing Debugger). This config already allows
+    // facebookexternalhit. If a 403 reappears, it's coming from a layer in
+    // front of this app — e.g. Render's bot/DDoS protection or a Cloudflare
+    // proxy — blocking the crawler's user-agent before the request reaches
+    // here. That has to be allowlisted in the hosting platform's dashboard,
+    // not in this file.
     if (pathname === '/robots.txt' && req.method === 'GET') {
       res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
-      return res.end(`User-agent: *\nDisallow: /admin\nSitemap: ${SITE_URL}/sitemap.xml\n`);
+      return res.end(`User-agent: *\nDisallow: /admin\n\nUser-agent: facebookexternalhit\nAllow: /\n\nUser-agent: Facebot\nAllow: /\n\nUser-agent: Twitterbot\nAllow: /\n\nSitemap: ${SITE_URL}/sitemap.xml\n`);
     }
 
     // sitemap.xml — homepage plus every published article
@@ -1871,6 +1884,6 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`BritThump is running at http://localhost:${PORT}`);
+  console.log(`The Tiny Island Times is running at http://localhost:${PORT}`);
   console.log(`Admin password is currently: ${ADMIN_PASSWORD === 'changeme' ? '"changeme" — set ADMIN_PASSWORD env variable before deploying!' : '(set via environment variable)'}`);
 });
